@@ -23,16 +23,16 @@ def get_readme():
 
 def get_doc_catalog():
     catalog = []
-    for root, folders, files in os.walk('..\\docs'):
+    for root, folders, files in os.walk('../docs'):
         for file in files:
-            path = os.path.join(root, file).replace('..\\docs\\', '')
-            catalog.append(path.replace('\\', '/').replace('.md', ''))
+            path = os.path.join(root, file).replace('../docs/', '')
+            catalog.append(path.replace('.md', ''))
     return catalog
 
 
 def get_doc_content(doc_path):
     try:
-        path = os.path.join('..\\docs', doc_path.replace('..', '').replace('/', '\\')) + '.md'
+        path = os.path.join('../docs', doc_path.replace('..', '')) + '.md'
     except:
         return None
     if not os.path.exists(path):
