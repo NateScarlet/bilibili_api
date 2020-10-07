@@ -123,7 +123,7 @@ bv号转av号。
 
 验证类，用于传入各种方法中。
 
-获取参数方法见 [获取_SESSDATA_和_CSRF](/docs/bilibili_api#获取_SESSDATA_和_CSRF)
+获取参数方法见 [获取_SESSDATA_和_CSRF](/bilibili_api/docs/#获取_SESSDATA_和_CSRF)
 
 #### 实例化参数
 

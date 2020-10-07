@@ -128,7 +128,7 @@ bvid: bv号，即b站改版之后用于标识视频的唯一ID。和aid可以互
 
 ### 评论相关
 
-参见 [评论信息和操作](/docs/bilibili_api/通用解释#评论信息和操作)，id还是一样传入bvid或aid。
+参见 [评论信息和操作](/bilibili_api/docs/通用解释#评论信息和操作)，id还是一样传入bvid或aid。
 
 ### send_danmaku
 
@@ -165,4 +165,4 @@ bvid: bv号，即b站改版之后用于标识视频的唯一ID。和aid可以互
 
 
 
-[Danmaku]: /docs/bilibili_api/模块/bilibili_api#Danmaku
+[Danmaku]: /bilibili_api/docs/模块/bilibili_api#Danmaku

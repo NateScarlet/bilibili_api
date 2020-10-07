@@ -26,13 +26,13 @@ def get_doc_catalog():
     for root, folders, files in os.walk('..\\docs'):
         for file in files:
             path = os.path.join(root, file).replace('..\\docs\\', '')
-            catalog.append(path.replace('\\', '/'))
+            catalog.append(path.replace('\\', '/').replace('.md', ''))
     return catalog
 
 
 def get_doc_content(doc_path):
     try:
-        path = os.path.join('..\\docs', doc_path.replace('..', '').replace('/', '\\'))
+        path = os.path.join('..\\docs', doc_path.replace('..', '').replace('/', '\\')) + '.md'
     except:
         return None
     if not os.path.exists(path):

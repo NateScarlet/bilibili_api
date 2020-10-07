@@ -281,6 +281,6 @@ if __name__ == '__main__':
 ```
 
 
-[Danmaku]: /docs/bilibili_api/模块/bilibili_api#Danmaku
+[Danmaku]: /bilibili_api/docs/模块/bilibili_api#Danmaku
 
-[循环获取数据参数说明]: /docs/bilibili_api/通用解释#循环获取数据参数说明
+[循环获取数据参数说明]: /bilibili_api/docs/通用解释#循环获取数据参数说明
