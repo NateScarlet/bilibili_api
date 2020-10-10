@@ -6,7 +6,7 @@ app = Flask(__name__, static_folder='./static')
 app.register_blueprint(bp)
 
 
-@app.route('', methods=['GET'])
+@app.route('/', methods=['GET'])
 def index():
     readme = utils.markdown2html(utils.get_readme())
     return render_template('index.html', version=utils.get_version(), readme=readme)
