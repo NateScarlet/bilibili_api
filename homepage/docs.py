@@ -1,7 +1,7 @@
 from flask import *
 import utils
 
-bp = Blueprint('docs', __name__, url_prefix='/bilibili_api/docs')
+bp = Blueprint('docs', __name__, url_prefix='/docs')
 
 
 @bp.route('/', methods=['GET'])
