@@ -37,6 +37,7 @@ if __name__ == '__main__':
             "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
             "Natural Language :: Chinese (Simplified)",
             "Programming Language :: Python :: 3.8"
+            "Programming Language :: Python :: 3.9"
         ],
         install_requires=[
             "requests >= 2.24.0",
@@ -57,7 +58,7 @@ if __name__ == '__main__':
             "Homepage": "https://passkou.com/bilibili_api",
             "Documentation": "https://passkou.com/docs/bilibili_api"
         },
-        python_requires=">=3",
+        python_requires=">=3.8",
         data_files=[
             ("", ["./LICENSE.md", "./CHANGELOG.md", "./version.txt", "./README.template.md"])
         ]

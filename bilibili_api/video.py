@@ -17,6 +17,14 @@ from xml.dom.minidom import parseString
 import re
 import datetime
 import time
+import os
+import base64
+import aiohttp
+import math
+import asyncio
+import logging
+import websockets
+import struct
 
 API = utils.get_api()
 
@@ -466,15 +474,12 @@ def operate_favorite(bvid: str = None, aid: int = None, add_media_ids: list = No
 # 评论相关
 
 
-def get_comments(bvid: str = None, aid: int = None, order: str = "time", limit: int = 1919810,
-                 callback=None, verify: utils.Verify = None):
+def get_comments_g(bvid: str = None, aid: int = None, order: str = "time", verify: utils.Verify = None):
     """
     获取评论
     :param order:
-    :param callback: 回调函数
     :param aid:
     :param bvid:
-    :param limit: 限制数量
     :param verify:
     :return:
     """
@@ -483,7 +488,7 @@ def get_comments(bvid: str = None, aid: int = None, order: str = "time", limit: 
     if aid is None:
         aid = utils.bvid2aid(bvid)
 
-    replies = common.get_comments(aid, "video", order, limit, callback, verify)
+    replies = common.get_comments(aid, "video", order, verify)
     return replies
 
 
@@ -699,6 +704,393 @@ def share_to_dynamic(content: str, bvid: str = None, aid: int = None, verify: ut
         aid = utils.bvid2aid(bvid)
     resp = common.dynamic_share("video", aid, content, verify=verify)
     return resp
+
+
+# 视频上传三步
+
+def video_upload(path: str, verify: utils.Verify):
+    """
+    上传视频
+    :param path: 视频路径
+    :param verify:
+    :return: 该视频的filename，用于后续提交投稿用
+    """
+    session = requests.session()
+    session.headers = utils.DEFAULT_HEADERS
+    requests.utils.add_dict_to_cookiejar(session.cookies, verify.get_cookies())
+    if not os.path.exists(path):
+        raise exceptions.UploadException("视频路径不存在")
+    total_size = os.stat(path).st_size
+    # 上传设置
+    params = {
+        'name': os.path.basename(path),
+        'size': total_size,
+        'r': 'upos',
+        'profile': 'ugcupos/bup'
+    }
+    resp = session.get('https://member.bilibili.com/preupload', params=params)
+    settings = resp.json()
+    upload_url = 'https:' + settings['endpoint'] + '/' + settings['upos_uri'].replace('upos://', '')
+    headers = {
+        'X-Upos-Auth': settings['auth']
+    }
+    resp = session.post(upload_url + "?uploads&output=json", headers=headers)
+    settings['upload_id'] = resp.json()['upload_id']
+    filename = os.path.splitext(resp.json()['key'].lstrip('/'))[0]
+    # 分配任务
+    chunks_settings = []
+    i = 0
+    total_chunks = math.ceil(total_size / settings['chunk_size'])
+    offset = 0
+    remain = total_size
+    while True:
+        s = {
+            'partNumber': i + 1,
+            'uploadId': settings['upload_id'],
+            'chunk': i,
+            'chunks': total_chunks,
+            'start': offset,
+            'end': offset + settings['chunk_size'] if remain >= settings['chunk_size'] else total_size,
+            'total': total_size
+        }
+        s['size'] = s['end'] - s['start']
+        chunks_settings.append(s)
+        i += 1
+        offset = s['end'] + 1
+        remain -= settings['chunk_size']
+        if remain <= 0:
+            break
+
+    async def upload(chunks, sess):
+        failed_chunks = []
+        with open(path, 'rb') as f:
+            for chunk in chunks:
+                print('上传区块中', chunk)
+                f.seek(chunk['start'], 0)
+                async with sess.put(upload_url, params=chunk, data=f.read(chunk['size']), headers=utils.DEFAULT_HEADERS) as r:
+                    if r.status != 200:
+                        print('区块上传失败：', chunk['chunk'], r.status)
+                        failed_chunks.append(chunk)
+        return failed_chunks
+
+    async def main():
+        chunks_per_thread = len(chunks_settings) // settings['threads']
+        remain = len(chunks_settings) % settings['threads']
+        task_chunks = []
+        for i in range(settings['threads']):
+            this_task_chunks = chunks_settings[i*chunks_per_thread:(i+1)*chunks_per_thread]
+            task_chunks.append(this_task_chunks)
+        task_chunks[-1] += (chunks_settings[-remain:])
+
+        async with aiohttp.ClientSession(headers={'X-Upos-Auth': settings['auth']}, cookies=verify.get_cookies()) as sess:
+            while True:
+                # 循环上传
+                coroutines = []
+                chs = task_chunks
+                for chunks in chs:
+                    coroutines.append(upload(chunks, sess))
+                results = await asyncio.gather(*coroutines)
+                failed_chunks = []
+                for result in results:
+                    failed_chunks += result
+                chs = failed_chunks
+                if len(chs) == 0:
+                    break
+            # 验证是否上传成功
+            params = {
+                'output': 'json',
+                'name': os.path.basename(path),
+                'profile': 'ugcupos/bup',
+                'uploadId': settings['upload_id'],
+                'biz_id': settings['biz_id']
+            }
+            payload = {
+                'parts': []
+            }
+            for chunk in chunks_settings:
+                payload['parts'].append({
+                    'eTag': 'eTag',
+                    'partNumber': chunk['partNumber']
+                })
+            async with sess.post(upload_url, params=params, data=payload) as resp:
+                result = await resp.read()
+                result = json.loads(result)
+                ok = result.get('OK', 0)
+                if ok == 1:
+                    return filename
+                else:
+                    raise exceptions.UploadException('视频上传失败')
+
+    r = asyncio.get_event_loop().run_until_complete(main())
+    return r
+
+
+def video_cover_upload(path, verify: utils.Verify):
+    """
+    封面上传
+    :param path:
+    :param verify:
+    :return: 封面URL，用于提交投稿信息用
+    """
+    if not os.path.exists(path):
+        raise exceptions.UploadException('封面路径不存在')
+    with open(path, 'rb') as f:
+        filename = os.path.basename(path)
+        if filename.endswith('.jpg') or filename.endswith('.jpeg'):
+            mime = 'image/jpeg'
+        elif filename.endswith('.png'):
+            mime = 'image/png'
+        elif filename.endswith('.gif'):
+            mime = 'image/gif'
+        data_url = f'data:{mime};base64,{base64.b64encode(f.read()).decode()}'
+        payload = {
+            'cover': data_url,
+            'csrf': verify.csrf
+        }
+        resp = utils.post('https://member.bilibili.com/x/vu/web/cover/up', data=payload,
+                          cookies=verify.get_cookies())
+        cover_url = resp['url']
+    return cover_url
+
+
+def video_submit(data: dict, verify: utils.Verify):
+    """
+    提交投稿信息
+    :param data: 投稿信息
+    {
+        "copyright": 1自制2转载,
+        "source": "类型为转载时注明来源",
+        "cover": "封面URL",
+        "desc": "简介",
+        "desc_format_id": 0,
+        "dynamic": "动态信息",
+        "interactive": 0,
+        "no_reprint": 1为显示禁止转载,
+        "subtitles": {
+            // 字幕格式，请自行研究
+            "lan": "语言",
+            "open": 0
+        },
+        "tag": "标签1,标签2,标签3（英文半角逗号分隔）",
+        "tid": 分区ID,
+        "title": "标题",
+        "videos": [
+            {
+                "desc": "描述",
+                "filename": "video_upload(返回值)",
+                "title": "分P标题"
+            }
+        ]
+    }
+    :param verify:
+    :return:
+    """
+    url = "https://member.bilibili.com/x/vu/web/add"
+    params = {
+        "csrf": verify.csrf
+    }
+    payload = json.dumps(data, ensure_ascii=False).encode()
+    resp = utils.post(url, params=params, data=payload, data_type="json", cookies=verify.get_cookies())
+    return resp
+
+
+def connect_all_VideoOnlineMonitor(*args):
+    async def main():
+        coroutines = []
+        for a in args:
+            coroutines.append(a.connect(True))
+        await asyncio.gather(*coroutines)
+    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.get_event_loop().run_forever()
+
+
+# 实时监控在线人数/在线弹幕
+class VideoOnlineMonitor:
+    DATAPACK_CLIENT_VERIFY = 0x7
+    DATAPACK_SERVER_VERIFY = 0x8
+    DATAPACK_CLIENT_HEARTBEAT = 0x2
+    DATAPACK_SERVER_HEARTBEAT = 0x3
+    DATAPACK_DANMAKU = 0x3e8
+
+    def __init__(self, bvid: str = None, aid: int = None, page: int = 0, event_handler=None, debug: bool = False,
+                 should_reconnect: bool = True):
+        self.event_handler = event_handler
+        """
+        事件type：
+        ONLINE： 在线人数更新
+        DANMAKU： 收到实时弹幕
+        DISCONNECT： 断开连接（传入连接状态码参数）
+        """
+        if bvid is not None:
+            self.bvid = bvid
+            self.aid = utils.bvid2aid(bvid)
+        elif aid is not None:
+            self.bvid = utils.aid2bvid(aid)
+            self.aid = aid
+        else:
+            raise exceptions.BilibiliApiException('bvid和aid必须提供其中之一')
+        # logger初始化
+        self.logger = logging.getLogger(f'VideoOnlineMonitor_{bvid}')
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[" + str(bvid) + "][%(asctime)s][%(levelname)s] %(message)s"))
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO if not debug else logging.DEBUG)
+        self.page = page
+        self.__next_number = 1
+        self.__connected_status = 0
+        self.__heart_beat_task = None
+        self.should_reconnect = should_reconnect
+        self.__is_single_room = False
+
+    def connect(self, return_coroutine: bool = False):
+        if return_coroutine:
+            self.__is_single_room = False
+            return self.__main()
+        else:
+            self.__is_single_room = True
+            asyncio.get_event_loop().run_until_complete(self.__main())
+            asyncio.get_event_loop().run_forever()
+
+    def disconnect(self):
+        self.__connected_status = 2
+        asyncio.create_task(self.__ws.close())
+
+    def get_connect_status(self):
+        return self.__connected_status
+
+    async def __main(self):
+        # 获取分P id
+        pages = get_pages(self.bvid)
+        if self.page >= len(pages):
+            raise exceptions.BilibiliApiException("分P不存在")
+        self.cid = pages[self.page]['cid']
+
+        self.logger.debug(f'准备连接：{self.bvid}')
+        self.logger.debug(f'获取服务器信息中')
+        resp = utils.get('https://api.bilibili.com/x/web-interface/broadcast/servers?platform=pc')
+        uri = f"wss://{resp['domain']}:{resp['wss_port']}/sub"
+        self.__heartbeat_interval = resp['heartbeat']
+        self.logger.debug(f'服务器信息获取成功，URI：{uri}')
+
+        self.logger.debug('准备连接服务器')
+        async with websockets.connect(uri) as ws:
+            self.__ws = ws
+            self.logger.debug('服务器连接成功，准备发送认证信息')
+            verify_info = {
+                'room_id': f'video://{self.aid}/{self.cid}',
+                'platform': 'web',
+                'accepts': [1000, 1015]
+            }
+            verify_info = json.dumps(verify_info, separators=(',', ':'))
+            await ws.send(self.__pack(self.DATAPACK_CLIENT_VERIFY, 1, verify_info.encode()))
+            while True:
+                try:
+                    recv = await ws.recv()
+                except websockets.ConnectionClosed:
+                    if self.__connected_status != 2:
+                        self.logger.warning('连接被异常断开')
+                        self.__connected_status = -1
+                        if self.should_reconnect:
+                            self.logger.info('准备重连')
+                            asyncio.create_task(self.connect(True))
+                    else:
+                        self.logger.info('连接正常断开')
+                        if self.__is_single_room:
+                            asyncio.get_event_loop().stop()
+                    if callable(self.event_handler):
+                        self.event_handler({'type': 'DISCONNECT', 'bvid': self.bvid, 'aid': self.aid, 'data': self.__connected_status})
+                    if self.__heart_beat_task is not None:
+                        self.__heart_beat_task.cancel()
+                    break
+                data = self.__unpack(recv)
+                self.logger.debug(f'收到消息：{data}')
+                for d in data:
+                    if d['type'] == self.DATAPACK_SERVER_VERIFY:
+                        if d['data']['code'] == 0:
+                            self.logger.info('连接服务器并验证成功')
+                            self.__connected_status = 1
+                            self.__heart_beat_task = asyncio.create_task(self.__heartbeat())
+                    elif d['type'] == self.DATAPACK_SERVER_HEARTBEAT:
+                        self.logger.debug(f'收到服务器心跳包反馈，编号：{d["number"]}')
+                        self.logger.info(f'实时观看人数：{d["data"]["data"]["room"]["online"]}')
+                        if callable(self.event_handler):
+                            self.event_handler({'type': 'ONLINE', 'bvid': self.bvid, 'aid': self.aid, 'data': d['data']['data']})
+                    elif d['type'] == self.DATAPACK_DANMAKU:
+                        info = d['data'][0].split(",")
+                        text = d['data'][1]
+                        if info[5] == '0':
+                            is_sub = False
+                        else:
+                            is_sub = True
+                        dm = utils.Danmaku(
+                            dm_time=float(info[0]),
+                            send_time=int(info[4]),
+                            crc32_id=info[6],
+                            color=utils.Color(info[3]),
+                            mode=info[1],
+                            font_size=info[2],
+                            is_sub=is_sub,
+                            text=text
+                        )
+                        self.logger.info(f'收到实时弹幕：{dm.text}')
+                        if callable(self.event_handler):
+                            self.event_handler({'type': 'DANMAKU', 'bvid': self.bvid, 'aid': self.aid, 'data': dm})
+                    else:
+                        self.logger.warning('收到未知的数据包类型，无法解析')
+
+    async def __heartbeat(self):
+        while self.__connected_status == 1:
+            self.logger.debug(f'发送心跳包，编号：{self.__next_number}')
+            try:
+                await self.__ws.send(self.__pack(self.DATAPACK_CLIENT_HEARTBEAT, self.__next_number, b'[object Object]'))
+            except:
+                break
+            self.__next_number += 1
+            await asyncio.sleep(self.__heartbeat_interval)
+
+    @staticmethod
+    def __pack(data_type: int, number: int, data: bytes):
+        """
+        数据包格式：
+        offset(bytes) length(bytes) type data
+        0  4  I 数据包长度
+        4  4  I 固定0x00120001
+        8  4  I 数据包类型
+        12 4  I 递增数据包编号
+        16 2  H 固定0x0000
+        之后是有效载荷
+        数据包类型表：
+        0x7  客户端发送认证信息
+        0x8  服务端回应认证结果
+        0x2  客户端发送心跳包，有效载荷：'[object Object]'
+        0x3  服务端回应心跳包，会带上在线人数等信息，返回JSON
+        0x3e8  实时弹幕更新，返回列表，[0]弹幕信息，[1]弹幕文本
+        """
+        packed_data = bytearray()
+        packed_data += struct.pack('>I', 0x00120001)
+        packed_data += struct.pack('>I', data_type)
+        packed_data += struct.pack('>I', number)
+        packed_data += struct.pack('>H', 0)
+        packed_data += data
+        packed_data = struct.pack('>I', len(packed_data) + 4) + packed_data
+        return bytes(packed_data)
+
+    @staticmethod
+    def __unpack(data: bytes):
+        offset = 0
+        real_data = []
+        while offset < len(data):
+            region_header = struct.unpack('>IIII', data[:16])
+            region_data = data[offset:offset+region_header[0]]
+            real_data.append({
+                'type': region_header[2],
+                'number': region_header[3],
+                'data': json.loads(region_data[offset+18:offset+18+(region_header[0]-16)])
+            })
+            offset += region_header[0]
+        return real_data
+
+
 
 
 r"""

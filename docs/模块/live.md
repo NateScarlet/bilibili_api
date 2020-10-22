@@ -107,7 +107,7 @@ room_real_id：真正的房间号。使用 [get_room_play_info](#get_room_play_i
 注意，block_id可用 [ban_user](#ban_user) 的返回值获取，或者 [get_black_list](#get_black_list) 中获取。
 
 
-### connect_all_livedanmaku
+### connect_all_LiveDanmaku
 
 自动连接多个直播间弹幕
 
@@ -132,6 +132,7 @@ room_real_id：真正的房间号。使用 [get_room_play_info](#get_room_play_i
 | debug           | bool | False    | False | 调试模式，将输出详细的信息    |
 | use_wss         | bool | False    | True  | 使用WSS（Websocket over SSL） |
 | verify         | bool | False    | None  | verify类，事实上不用提供也行 |
+| should_reconnect         | bool | False    | True  | 异常断开后是否重连 |
 
 #### 属性
 
@@ -147,7 +148,7 @@ room_real_id：真正的房间号。使用 [get_room_play_info](#get_room_play_i
 
 | 参数名          | 类型 | 必须提供 | 默认  | 释义                          |
 | --------------- | ---- | -------- | ----- | ----------------------------- |
-| return_task | bool  | False     | False     | 返回Task类，供用户自行调用协程 |
+| return_coroutine | bool  | False     | False     | 返回 Coroutine 类，供用户自行调用协程 |
 
 
 ##### disconnect
@@ -165,9 +166,11 @@ room_real_id：真正的房间号。使用 [get_room_play_info](#get_room_play_i
 | func | Function  | True     | -     | 事件处理器方法 |
 
 
-##### has_connected
+##### get_connect_status
 
-是否已连接直播间
+获取连接直播间状态
+
+0未连接，1已连接，3已正常断开，-1异常断开
 
 #### 事件
 
@@ -227,6 +230,7 @@ ACTIVITY_BANNER_UPDATE_V2: 好像是房间名旁边那个xx小时榜
 ```
 ALL: 所有事件均调用回调函数
 VIEW: 直播间人气更新
+DISCONNECT: 断开连接
 ```
 
 回调数据格式：

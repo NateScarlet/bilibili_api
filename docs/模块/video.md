@@ -164,5 +164,190 @@ bvid: bv号，即b站改版之后用于标识视频的唯一ID。和aid可以互
 | content | str  | True     | -    | 动态内容 |
 
 
+## 上传视频
+
+上传视频步骤略繁琐，故单独在这说明。
+
+一共有三个方法，分别如下：
+
+`video_upload(path, verify)`: 上传视频文件到b站服务器
+
+`video_cover_upload(path, verify)`: 上传视频封面
+
+`video_submit(data, verify)`: 提交投稿
+
+verify传入完全参数，必须提供。
+
+因为投稿参数过多，而且不知道以后会不会变，所以直接传入原始请求参数
+
+提交投稿data参数如下：
+
+```json
+{
+    "copyright": 1自制2转载,
+    "source": "类型为转载时注明转载来源，为自制时删除此键",
+    "cover": "封面URL",
+    "desc": "简介",
+    "desc_format_id": 0,
+    "dynamic": "动态信息",
+    "interactive": 0,
+    "no_reprint": 1为显示禁止转载,
+    "subtitles": {
+        // 字幕格式，请自行研究
+        "lan": "语言",
+        "open": 0
+    },
+    "tag": "标签1,标签2,标签3（英文半角逗号分隔）",
+    "tid": 分区ID（channel模块里头可以获取到）,
+    "title": "标题",
+    "videos": [
+        {
+            "desc": "描述",
+            "filename": "video_upload(返回值)",
+            "title": "分P标题"
+        }
+    ]
+}
+```
+
+举个栗子
+
+```python
+from bilibili_api import video, Verify
+
+verify = Verify("sessdata", "csrf")
+# 上传视频
+filename = video.video_upload("D:/整活.mp4", verify=verify)
+# 上传封面
+cover_url = video.video_cover_upload("D:/整活.png", verify=verify)
+data = {
+    "copyright": 1,
+    "cover": cover_url,
+    "desc": "无端迫害",
+    "desc_format_id": 0,
+    "dynamic": "",
+    "interactive": 0,
+    "no_reprint": 1,
+    "subtitles": {
+        "lan": "",
+        "open": 0
+    },
+    "tag": "哲学,请问您今天要来点兔子吗,鬼畜调教",
+    "tid": 22,
+    "title": "请问您今天要来点哲♂学吗",
+    "videos": [
+        {
+            "desc": "",
+            "filename": filename,
+            "title": "P1"
+        }
+    ]
+}
+# 提交投稿
+result = video.video_submit(data, verify=verify)
+
+# 成功的话会返回bv号和av号
+print(result)
+
+```
+
+## 类
+
+### VideoOnlineMonitor
+
+通过Websocket实时连接视频房间，可实时获取在线人数、弹幕更新，
+
+#### 初始化参数
+
+| 参数名          | 类型 | 必须提供 | 默认  | 释义                          |
+| --------------- | ---- | -------- | ----- | ----------------------------- |
+| bvid | str  | False     | None     | bv号（aid和bvid两者必须提供其中一个，bv号优先级更高）                    |
+| aid | int  | False     | None     | av号（aid和bvid两者必须提供其中一个）                    |
+| debug           | bool | False    | False | 调试模式，将输出详细的信息    |
+| should_reconnect         | bool | False    | True  | 异常断开后是否重连 |
+| page         | int | False    | 0  | 分P编号，从0开始 |
+| event_handler         | Function | False    | None  | 事件处理器，因为事件比较少所以就没像live.LiveDanmaku那样写装饰器了 |
+
+#### 属性
+
+| 属性名 | 类型           | 释义                           |
+| ------ | -------------- | ------------------------------ |
+| logger | logging.Logger | 日志记录，可以自行设置一些输出 |
+
+#### 方法
+
+##### connect
+
+连接弹幕服务器。
+
+| 参数名          | 类型 | 必须提供 | 默认  | 释义                          |
+| --------------- | ---- | -------- | ----- | ----------------------------- |
+| return_coroutine | bool  | False     | False     | 返回 Coroutine 类，供用户自行调用协程 |
+
+
+##### disconnect
+
+断开弹幕服务器连接。
+
+##### get_connect_status
+
+获取连接直播间状态
+
+0未连接，1已连接，3已正常断开，-1异常断开
+
+#### 事件
+
+收到事件时调用用户指定方法，完整例子：
+
+```python
+from bilibili_api.video import VideoOnlineMonitor
+
+def event_handler(data):
+    print(data)
+
+room = VideoOnlineMonitor(bvid="BV1uv411q7Mv", event_handler=event_handler)
+
+    
+if __name__ == "__main__":
+    room.connect()
+```
+
+常用事件名：
+
+```
+ONLINE： 在线人数更新
+DANMAKU： 收到实时弹幕
+DISCONNECT： 断开连接（传入连接状态码参数）
+```
+
+回调数据格式：
+```json
+{
+    "type": "事件名，类型str", 
+    "aid": "av号，类型int", 
+    "bvid": "bv号，类型str", 
+    "data": "事件内容，类型根据事件类型而定"
+}
+```
+
+需要注意的是收到弹幕时会返回 [Danmaku][Danmaku] 类，已经帮你解析好了。
+
+### 连接多个视频
+
+```python
+import bilibili_api
+
+def on_event(data):
+    print(data)
+
+room = bilibili_api.video.VideoOnlineMonitor('BV1y54y1k7CB', debug=False, event_handler=on_event)
+room1 = bilibili_api.video.VideoOnlineMonitor('BV1y54y1k7CB', debug=False, event_handler=on_event)
+
+if __name__ == '__main__':
+    bilibili_api.video.connect_all_VideoOnlineMonitor(room, room1)
+    # 用列表解构
+    rooms = [room, room1]
+    bilibili_api.video.connect_all_VideoOnlineMonitor(*rooms)
+```
 
 [Danmaku]: /bilibili_api/docs/模块/bilibili_api#Danmaku

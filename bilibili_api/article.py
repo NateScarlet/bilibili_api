@@ -29,17 +29,15 @@ API = utils.get_api()
 # 评论相关
 
 
-def get_comments(cv: int, order: str = "time", limit: int = 1919810, callback=None, verify: utils.Verify = None):
+def get_comments_g(cv: int, order: str = "time", verify: utils.Verify = None):
     """
     获取评论
     :param cv: cv号
     :param order:
-    :param callback: 回调函数
-    :param limit: 限制数量
     :param verify:
     :return:
     """
-    replies = common.get_comments(cv, "article", order, limit, callback, verify)
+    replies = common.get_comments(cv, "article", order, verify)
     return replies
 
 
@@ -228,7 +226,7 @@ def get_content(cid: int, preview: bool = False, verify: utils.Verify = None):
 
     if not preview:
         # 拉取数据
-        protocol = "https" if utils.use_https else "http"
+        protocol = "https" if utils.request_settings['use_https'] else "http"
         url = f"{protocol}://www.bilibili.com/read/cv{cid}"
         resp = requests.get(url, headers=utils.DEFAULT_HEADERS, cookies=verify.get_cookies())
         if "error" in resp.url:
@@ -651,7 +649,7 @@ class ImageNode(AbstractNode):
         return f"![{self.alt}]({self.url} \"{self.alt}\")"
 
 
-# 专栏卡片
+# 卡片
 
 
 class AbstractCardNode(AbstractNode):
