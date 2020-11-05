@@ -1,12 +1,13 @@
 import os
 import markdown
 import re
+import json
 
 
 def get_version():
-    with open("../version.txt") as f:
-        version = f.read()
-        return version
+    with open("../bilibili_api/about.json", encoding="utf8") as f:
+        data = json.loads(f.read())
+        return data['version']
 
 
 def markdown2html(markdown_content):
