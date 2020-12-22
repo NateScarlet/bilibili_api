@@ -342,13 +342,7 @@ def connect_all_LiveDanmaku(*livedanmaku_classes):
         task = room.connect(True)
         tasks.append(task)
 
-    async def run():
-        for task in tasks:
-            await task
-
-    asyncio.get_event_loop().run_until_complete(run())
-    asyncio.get_event_loop().run_forever()
-
+    asyncio.get_event_loop().run_until_complete(asyncio.wait(tasks))
 
 class LiveDanmaku(object):
     """
